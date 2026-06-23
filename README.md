@@ -1,54 +1,253 @@
-# DevMind
+# DevMind - AI-Powered GitHub Pull Request Review Agent
 
-Initial project skeleton for DevMind, an AI-powered GitHub code review agent.
+DevMind is an AI-powered code review platform that automatically analyzes GitHub Pull Requests using Retrieval-Augmented Generation (RAG), Large Language Models (LLMs), and specialized review agents.
+
+The system reviews code changes for security vulnerabilities, performance bottlenecks, and code quality issues, then generates structured findings with severity ratings and actionable recommendations.
+
+---
+
+## Features
+
+### Automated Pull Request Analysis
+
+* GitHub webhook integration
+* Automatic PR detection and processing
+* Real-time review generation
+
+### Multi-Agent Review System
+
+* Security Review Agent
+* Performance Review Agent
+* Code Quality Review Agent
+* Aggregated review results
+
+### Retrieval-Augmented Generation (RAG)
+
+* Repository indexing
+* ChromaDB vector storage
+* Context-aware code analysis
+* Semantic code retrieval
+
+### AI-Powered Reviews
+
+* Google Gemini 2.5 Flash integration
+* Severity classification
+* Evidence extraction
+* Actionable recommendations
+
+### Review Dashboard
+
+* Repository management
+* Review history
+* Severity analytics
+* Finding categorization
+* Detailed issue inspection
+
+---
+
+## Architecture
+
+```text
+GitHub Pull Request
+        │
+        ▼
+ GitHub Webhook
+        │
+        ▼
+ Repository Indexer
+        │
+        ▼
+     ChromaDB
+        │
+        ▼
+ Context Retrieval
+        │
+        ▼
+ ┌─────────────────┐
+ │ Security Agent  │
+ ├─────────────────┤
+ │PerformanceAgent │
+ ├─────────────────┤
+ │ Quality Agent   │
+ └─────────────────┘
+        │
+        ▼
+ Review Aggregator
+        │
+        ▼
+    MongoDB
+        │
+        ▼
+ React Dashboard
+```
+
+---
 
 ## Tech Stack
-- Backend: Node.js + Express.js
-- Frontend: React + Vite
-- Database: MongoDB
-- Vector DB: ChromaDB
+
+### Frontend
+
+* React.js
+* React Router
+* Axios
+* CSS
+
+### Backend
+
+* Node.js
+* Express.js
+
+### Database
+
+* MongoDB
+* ChromaDB (Vector Database)
+
+### AI & RAG
+
+* Google Gemini 2.5 Flash
+* Embedding-based retrieval
+* Repository indexing
+
+### Integrations
+
+* GitHub REST API
+* GitHub Webhooks
+
+---
 
 ## Project Structure
 
-```
-DevMind Project/
-  backend/
-    src/
-      config/
-        chroma.js
-        db.js
-      routes/
-        index.js
-      server.js
-    .env.example
-    package.json
-  frontend/
-    src/
-      App.jsx
-      App.css
-      index.css
-      main.jsx
-    .env.example
-    package.json
-  .gitignore
-  README.md
+```text
+portfolio-analyzer
+│
+├── frontend
+│   ├── src
+│   │   ├── components
+│   │   ├── pages
+│   │   ├── services
+│   │   └── utils
+│
+├── backend
+│   ├── middleware
+│   ├── models
+│   ├── routes
+│   ├── services
+│   │   ├── agents
+│   │   ├── rag
+│   │   ├── geminiService.js
+│   │   └── reviewService.js
+│   └── server.js
 ```
 
-## Setup
+---
 
-1. Backend
-- cd backend
-- npm install
-- copy .env.example to .env
-- npm run dev
+## Setup Instructions
 
-2. Frontend
-- cd frontend
-- npm install
-- copy .env.example to .env
-- npm run dev
+### Clone Repository
 
-This skeleton intentionally contains no feature implementation yet.
+```bash
+git clone <repository-url>
+cd portfolio-analyzer
+```
 
+### Backend Setup
 
-C:\Users\sjraj\AppData\Local\Packages\PythonSoftwareFoundation.Python.3.12_qbz5n2kfra8p0\LocalCache\local-packages\Python312\Scripts\chroma.exe run --host localhost --port 8000
+```bash
+cd backend
+npm install
+```
+
+Create `.env`
+
+```env
+PORT=5000
+
+MONGODB_URI=your_mongodb_connection
+
+CHROMA_URL=http://localhost:8000
+CHROMA_COLLECTION=devmind-pr-reviews
+
+GITHUB_TOKEN=your_github_token
+GITHUB_ACCESS_TOKEN=your_github_token
+GITHUB_WEBHOOK_SECRET=your_webhook_secret
+
+GEMINI_API_KEY=your_gemini_api_key
+GEMINI_MODEL=gemini-2.5-flash
+```
+
+Start backend:
+
+```bash
+npm start
+```
+
+---
+
+### Frontend Setup
+
+```bash
+cd frontend
+npm install
+npm start
+```
+
+---
+
+## Workflow
+
+1. User creates a Pull Request on GitHub.
+2. GitHub webhook notifies DevMind.
+3. Repository files are indexed and stored in ChromaDB.
+4. Relevant code context is retrieved using semantic search.
+5. Security, Performance, and Quality agents analyze the PR.
+6. Findings are aggregated and stored in MongoDB.
+7. Results are displayed in the dashboard.
+
+---
+
+## Sample Review Output
+
+```text
+Severity: High
+
+Title:
+Blocking loop with console.log in App.js
+
+Category:
+Performance
+
+File:
+frontend/src/App.js
+
+Recommendation:
+Move expensive operations outside render paths and avoid
+long-running synchronous loops in the UI thread.
+```
+
+---
+
+## Future Enhancements
+
+* GitHub OAuth Authentication
+* Multi-user support
+* PR comments directly on GitHub
+* Team workspaces
+* Advanced repository analytics
+* Support for multiple LLM providers
+* CI/CD integration
+* Slack and Discord notifications
+
+---
+
+## Author
+
+Shaurya Rajput
+
+B.Tech Information Technology
+VJTI Mumbai
+
+---
+
+## License
+
+This project is intended for educational and portfolio purposes.
