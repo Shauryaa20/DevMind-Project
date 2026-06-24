@@ -8,7 +8,7 @@ dotenv.config();
 
 // Validate required environment variables at boot to prevent silent/incomplete runtime failures
 const validateEnvironment = () => {
-  const requiredVars = ['MONGODB_URI', 'CHROMA_URL', 'OPENAI_API_KEY'];
+  const requiredVars = ['MONGODB_URI', 'CHROMA_URL', 'GEMINI_API_KEY'];
   const missing = requiredVars.filter((v) => !process.env[v] || !process.env[v].trim());
 
   if (missing.length > 0) {
