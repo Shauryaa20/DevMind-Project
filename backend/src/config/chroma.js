@@ -11,11 +11,18 @@ const createChromaClient = () => {
     ? new URL(chromaUrl)
     : new URL(`http://${chromaUrl}`);
 
+  const host = parsedUrl.hostname;
+  const port = Number(parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80));
+  const ssl = parsedUrl.protocol === 'https:';
+
+  console.log(`[Chroma Diagnostic] Instantiating ChromaClient with host: "${host}", port: ${port}, ssl: ${ssl}`);
+
   return new ChromaClient({
-    host: parsedUrl.hostname,
-    port: Number(parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80)),
-    ssl: parsedUrl.protocol === 'https:',
+    host,
+    port,
+    ssl,
   });
 };
 
 module.exports = { createChromaClient };
+

@@ -152,6 +152,10 @@ const readRepositoryFiles = async (repositoryPath, options = {}) => {
   const maxFileSizeBytes = normalizeMaxFileSize(options.maxFileSizeBytes);
   const files = [];
 
+  console.log('[INDEX] Discovering files...');
+  const walkStart = Date.now();
+  let totalDiscovered = 0;
+
   const walk = async (currentPath) => {
     const entries = await fs.promises.readdir(currentPath, { withFileTypes: true });
 
@@ -169,6 +173,8 @@ const readRepositoryFiles = async (repositoryPath, options = {}) => {
       if (!entry.isFile()) {
         continue;
       }
+
+      totalDiscovered++;
 
       if (!isAllowedFile(absolutePath, options)) {
         continue;
@@ -205,9 +211,16 @@ const readRepositoryFiles = async (repositoryPath, options = {}) => {
     }
   };
 
-  await walk(rootPath);
-
-  return files;
+  try {
+    await walk(rootPath);
+    console.log(`[INDEX] Files discovered: ${totalDiscovered} in ${Date.now() - walkStart} ms`);
+    console.log('[INDEX] Filtering supported files...');
+    console.log(`[INDEX] Supported files: ${files.length}`);
+    return files;
+  } catch (error) {
+    console.error("[INDEX] FAILED during File traversal", error);
+    throw error;
+  }
 };
 
 const createIndexer = ({ chunker = getChunker(), chromaService = getChromaService() } = {}) => {
@@ -238,39 +251,48 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
       };
     }
 
-    const chunkRecords = codeFiles.flatMap((file) => {
-      const chunks = chunker.chunkCodeFile(
-        {
-          sourceCode: file.sourceCode,
-          filePath: file.relativePath,
-          language: file.language,
-          id: file.relativePath,
+    console.log('[INDEX] Chunk generation started');
+    const chunkStart = Date.now();
+    let chunkRecords;
+    try {
+      chunkRecords = codeFiles.flatMap((file) => {
+        const chunks = chunker.chunkCodeFile(
+          {
+            sourceCode: file.sourceCode,
+            filePath: file.relativePath,
+            language: file.language,
+            id: file.relativePath,
+            metadata: {
+              repository: normalizedRepositoryName,
+              repositoryPath: normalizedRepositoryPath,
+              fileName: file.fileName,
+              filePath: file.relativePath,
+              absolutePath: file.absolutePath,
+              fileSizeBytes: file.sizeBytes,
+            },
+          },
+          chunkOptions,
+        );
+
+        return chunks.map((chunk) => ({
+          id: chunk.chunkId,
+          sourceCode: chunk.content,
           metadata: {
+            ...chunk.metadata,
             repository: normalizedRepositoryName,
             repositoryPath: normalizedRepositoryPath,
             fileName: file.fileName,
             filePath: file.relativePath,
             absolutePath: file.absolutePath,
-            fileSizeBytes: file.sizeBytes,
+            chunkId: chunk.chunkId,
           },
-        },
-        chunkOptions,
-      );
-
-      return chunks.map((chunk) => ({
-        id: chunk.chunkId,
-        sourceCode: chunk.content,
-        metadata: {
-          ...chunk.metadata,
-          repository: normalizedRepositoryName,
-          repositoryPath: normalizedRepositoryPath,
-          fileName: file.fileName,
-          filePath: file.relativePath,
-          absolutePath: file.absolutePath,
-          chunkId: chunk.chunkId,
-        },
-      }));
-    });
+        }));
+      });
+      console.log(`[INDEX] Chunks generated: ${chunkRecords.length} in ${Date.now() - chunkStart} ms`);
+    } catch (error) {
+      console.error("[INDEX] FAILED during Chunk generation", error);
+      throw error;
+    }
 
     const indexedChunks = await chromaService.storeCodeChunks({
       chunks: chunkRecords,
@@ -300,9 +322,19 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
     collectionName = DEFAULT_COLLECTION_NAME,
     chunkOptions = {},
   }) => {
+    console.log('[INDEX] Discovering files...');
+    const discoverStart = Date.now();
+
     if (!Array.isArray(codeFiles) || codeFiles.length === 0) {
+      console.log(`[INDEX] Files discovered: 0 in ${Date.now() - discoverStart} ms`);
       throw new IndexerError('codeFiles must be a non-empty array.', 400);
     }
+
+    const totalDiscovered = codeFiles.length;
+    console.log(`[INDEX] Files discovered: ${totalDiscovered} in ${Date.now() - discoverStart} ms`);
+
+    console.log('[INDEX] Filtering supported files...');
+    const filterStart = Date.now();
 
     const normalizedRepositoryPath = normalizeRepositoryPath(repositoryPath);
     const normalizedRepositoryName = normalizeRepositoryName(
@@ -342,6 +374,8 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
       }
     });
 
+    console.log(`[INDEX] Supported files: ${validFiles.length} in ${Date.now() - filterStart} ms`);
+
     if (validFiles.length === 0) {
       return {
         repositoryName: normalizedRepositoryName,
@@ -353,66 +387,75 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
       };
     }
 
-    const chunkRecords = validFiles.flatMap((file, index) => {
-      const relativePath =
-        typeof file.relativePath === 'string' && file.relativePath.trim()
-          ? file.relativePath.trim().split(path.sep).join('/')
-          : typeof file.filePath === 'string' && file.filePath.trim()
-            ? file.filePath.trim().split(path.sep).join('/')
-            : undefined;
+    console.log('[INDEX] Chunk generation started');
+    const chunkStart = Date.now();
+    let chunkRecords;
+    try {
+      chunkRecords = validFiles.flatMap((file, index) => {
+        const relativePath =
+          typeof file.relativePath === 'string' && file.relativePath.trim()
+            ? file.relativePath.trim().split(path.sep).join('/')
+            : typeof file.filePath === 'string' && file.filePath.trim()
+              ? file.filePath.trim().split(path.sep).join('/')
+              : undefined;
 
-      const absolutePath =
-        typeof file.absolutePath === 'string' && file.absolutePath.trim()
-          ? path.resolve(file.absolutePath)
-          : relativePath
-            ? path.join(normalizedRepositoryPath, relativePath)
-            : path.join(normalizedRepositoryPath, `file-${index + 1}`);
+        const absolutePath =
+          typeof file.absolutePath === 'string' && file.absolutePath.trim()
+            ? path.resolve(file.absolutePath)
+            : relativePath
+              ? path.join(normalizedRepositoryPath, relativePath)
+              : path.join(normalizedRepositoryPath, `file-${index + 1}`);
 
-      const finalRelativePath = relativePath || normalizeRelativePath(absolutePath, normalizedRepositoryPath);
+        const finalRelativePath = relativePath || normalizeRelativePath(absolutePath, normalizedRepositoryPath);
 
-      const fileName =
-        typeof file.fileName === 'string' && file.fileName.trim()
-          ? file.fileName.trim()
-          : path.basename(finalRelativePath);
+        const fileName =
+          typeof file.fileName === 'string' && file.fileName.trim()
+            ? file.fileName.trim()
+            : path.basename(finalRelativePath);
 
-      const sourceCode = file.sourceCode;
+        const sourceCode = file.sourceCode;
 
-      const language =
-        typeof file.language === 'string' && file.language.trim()
-          ? file.language.trim()
-          : 'unknown';
+        const language =
+          typeof file.language === 'string' && file.language.trim()
+            ? file.language.trim()
+            : 'unknown';
 
-      const chunks = chunker.chunkCodeFile(
-        {
-          sourceCode,
-          filePath: finalRelativePath,
-          language,
-          id: finalRelativePath,
+        const chunks = chunker.chunkCodeFile(
+          {
+            sourceCode,
+            filePath: finalRelativePath,
+            language,
+            id: finalRelativePath,
+            metadata: {
+              repository: normalizedRepositoryName,
+              repositoryPath: normalizedRepositoryPath,
+              fileName,
+              filePath: finalRelativePath,
+              absolutePath,
+            },
+          },
+          chunkOptions,
+        );
+
+        return chunks.map((chunk) => ({
+          id: chunk.chunkId,
+          sourceCode: chunk.content,
           metadata: {
+            ...chunk.metadata,
             repository: normalizedRepositoryName,
             repositoryPath: normalizedRepositoryPath,
             fileName,
             filePath: finalRelativePath,
             absolutePath,
+            chunkId: chunk.chunkId,
           },
-        },
-        chunkOptions,
-      );
-
-      return chunks.map((chunk) => ({
-        id: chunk.chunkId,
-        sourceCode: chunk.content,
-        metadata: {
-          ...chunk.metadata,
-          repository: normalizedRepositoryName,
-          repositoryPath: normalizedRepositoryPath,
-          fileName,
-          filePath: finalRelativePath,
-          absolutePath,
-          chunkId: chunk.chunkId,
-        },
-      }));
-    });
+        }));
+      });
+      console.log(`[INDEX] Chunks generated: ${chunkRecords.length} in ${Date.now() - chunkStart} ms`);
+    } catch (error) {
+      console.error("[INDEX] FAILED during Chunk generation", error);
+      throw error;
+    }
 
     const indexedChunks = await chromaService.storeCodeChunks({
       chunks: chunkRecords,

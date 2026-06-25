@@ -81,6 +81,15 @@ const indexRepository = handleAsync(async (req, res) => {
     finalRepName = `${ownerName}/${repoName}`;
   }
 
+  console.log('[API] POST /api/repositories/index received', {
+    owner: owner || null,
+    repo: repo || null,
+    ref: ref || null
+  });
+
+  console.log('[INDEX] Request received');
+  console.log(`[INDEX] Repository: ${finalRepName || repositoryName || (ownerName && repoName ? `${ownerName}/${repoName}` : 'unknown')}`);
+
   const indexer = getIndexer();
 
   let indexResult;
@@ -123,17 +132,28 @@ const indexRepository = handleAsync(async (req, res) => {
     });
   }
 
-  const savedRepo = await Repository.findOneAndUpdate(
-    { owner: ownerName, repo: repoName },
-    {
-      owner: ownerName,
-      repo: repoName,
-      fullName: `${ownerName}/${repoName}`,
-      defaultBranch: ref || 'main',
-      lastIndexedAt: new Date(),
-    },
-    { upsert: true, returnDocument: 'after' }
-  ).lean();
+  console.log('[INDEX] Starting MongoDB write...');
+  const mongoStart = Date.now();
+  let savedRepo;
+  try {
+    savedRepo = await Repository.findOneAndUpdate(
+      { owner: ownerName, repo: repoName },
+      {
+        owner: ownerName,
+        repo: repoName,
+        fullName: `${ownerName}/${repoName}`,
+        defaultBranch: ref || 'main',
+        lastIndexedAt: new Date(),
+      },
+      { upsert: true, returnDocument: 'after' }
+    ).lean();
+    console.log(`[INDEX] MongoDB write completed successfully in ${Date.now() - mongoStart} ms`);
+  } catch (error) {
+    console.error("[INDEX] FAILED during MongoDB writes", error);
+    throw error;
+  }
+
+  console.log('[INDEX] Repository indexing completed successfully');
 
   res.status(200).json({
     message: 'Repository indexed successfully',

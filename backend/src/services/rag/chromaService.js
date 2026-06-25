@@ -83,7 +83,16 @@ const buildDocumentText = (sourceCode, metadata = {}) => {
 };
 
 const createChromaService = () => {
-  const client = createChromaClient();
+  console.log('[INDEX] Chroma client creation started');
+  const clientStart = Date.now();
+  let client;
+  try {
+    client = createChromaClient();
+    console.log(`[INDEX] Chroma client created successfully in ${Date.now() - clientStart} ms`);
+  } catch (error) {
+    console.error("[INDEX] FAILED during Chroma client creation", error);
+    throw error;
+  }
   const collectionCache = new Map();
   const embedder = getEmbedder();
 
@@ -96,19 +105,30 @@ const createChromaService = () => {
   };
 
   const resolveCollection = async (collectionName) => {
-    if (typeof client.getOrCreateCollection === 'function') {
-      return client.getOrCreateCollection({ name: collectionName, embeddingFunction: dummyEmbeddingFunction });
-    }
-
-    if (typeof client.getCollection === 'function') {
-      try {
-        return await client.getCollection({ name: collectionName, embeddingFunction: dummyEmbeddingFunction });
-      } catch {
-        return client.createCollection({ name: collectionName, embeddingFunction: dummyEmbeddingFunction });
+    console.log(`[Chroma Diagnostic] Resolving collection "${collectionName}"...`);
+    try {
+      let collection;
+      if (typeof client.getOrCreateCollection === 'function') {
+        console.log(`[Chroma Diagnostic] Invoking client.getOrCreateCollection for "${collectionName}"`);
+        collection = await client.getOrCreateCollection({ name: collectionName, embeddingFunction: dummyEmbeddingFunction });
+      } else if (typeof client.getCollection === 'function') {
+        try {
+          console.log(`[Chroma Diagnostic] Invoking client.getCollection for "${collectionName}"`);
+          collection = await client.getCollection({ name: collectionName, embeddingFunction: dummyEmbeddingFunction });
+        } catch (getErr) {
+          console.log(`[Chroma Diagnostic] client.getCollection failed, falling back to client.createCollection: ${getErr.message || getErr}`);
+          collection = await client.createCollection({ name: collectionName, embeddingFunction: dummyEmbeddingFunction });
+        }
+      } else {
+        console.log(`[Chroma Diagnostic] Invoking client.createCollection for "${collectionName}"`);
+        collection = await client.createCollection({ name: collectionName, embeddingFunction: dummyEmbeddingFunction });
       }
+      console.log(`[Chroma Diagnostic] Successfully resolved collection "${collectionName}"`);
+      return collection;
+    } catch (error) {
+      console.error(`[Chroma Diagnostic] Failed to resolve collection "${collectionName}":`, error);
+      throw error;
     }
-
-    return client.createCollection({ name: collectionName, embeddingFunction: dummyEmbeddingFunction });
   };
 
   const getCollection = async (collectionName = DEFAULT_COLLECTION_NAME) => {
@@ -132,16 +152,26 @@ const createChromaService = () => {
     }
 
     try {
+      console.log(`[Chroma Diagnostic] Creating collection "${name}"...`);
       const collection = await client.createCollection({ name, embeddingFunction: dummyEmbeddingFunction });
+      console.log(`[Chroma Diagnostic] Successfully created collection "${name}"`);
       collectionCache.set(name, collection);
       return collection;
     } catch (error) {
+      console.warn(`[Chroma Diagnostic] createCollection failed for "${name}": ${error.message || error}. Trying fallback...`);
       if (typeof client.getOrCreateCollection === 'function') {
-        const collection = await client.getOrCreateCollection({ name, embeddingFunction: dummyEmbeddingFunction });
-        collectionCache.set(name, collection);
-        return collection;
+        try {
+          const collection = await client.getOrCreateCollection({ name, embeddingFunction: dummyEmbeddingFunction });
+          console.log(`[Chroma Diagnostic] Successfully resolved collection via fallback getOrCreateCollection for "${name}"`);
+          collectionCache.set(name, collection);
+          return collection;
+        } catch (fallbackError) {
+          console.error(`[Chroma Diagnostic] Fallback getOrCreateCollection also failed for "${name}":`, fallbackError);
+          throw fallbackError;
+        }
       }
 
+      console.error(`[Chroma Diagnostic] Failed to create collection "${name}":`, error);
       throw new ChromaServiceError(
         `Unable to create Chroma collection \"${name}\".`,
         500,
@@ -195,34 +225,61 @@ const createChromaService = () => {
       throw new ChromaServiceError('chunks must be a non-empty array.', 400);
     }
 
-    const collection = await getCollection(collectionName);
+    console.log('[INDEX] Connecting to Chroma...');
+    const connectStart = Date.now();
+    let collection;
+    try {
+      collection = await getCollection(collectionName);
+      console.log(`[INDEX] Chroma connected in ${Date.now() - connectStart} ms`);
+      console.log('[INDEX] Collection loaded');
+    } catch (error) {
+      console.error("[INDEX] FAILED during Chroma collection retrieval/creation", error);
+      throw error;
+    }
+
     const normalizedChunks = chunks.map(normalizeChunk);
     const embeddings = [];
     const ids = [];
     const documents = [];
     const metadatas = [];
 
-    for (const chunk of normalizedChunks) {
-      const { vector } = await embedder.embedSourceCode(chunk.sourceCode);
+    console.log('[INDEX] Starting embeddings...');
+    const embeddingStart = Date.now();
+    try {
+      for (const chunk of normalizedChunks) {
+        const { vector } = await embedder.embedSourceCode(chunk.sourceCode);
 
-      if (!Array.isArray(vector) || !vector.length) {
-        throw new ChromaServiceError('Failed to generate a valid embedding vector.', 500);
+        if (!Array.isArray(vector) || !vector.length) {
+          throw new ChromaServiceError('Failed to generate a valid embedding vector.', 500);
+        }
+
+        const chunkId = chunk.id || `chunk_${Date.now()}_${ids.length}`;
+
+        ids.push(chunkId);
+        embeddings.push(vector);
+        documents.push(buildDocumentText(chunk.sourceCode, chunk.metadata));
+        metadatas.push(chunk.metadata);
       }
-
-      const chunkId = chunk.id || `chunk_${Date.now()}_${ids.length}`;
-
-      ids.push(chunkId);
-      embeddings.push(vector);
-      documents.push(buildDocumentText(chunk.sourceCode, chunk.metadata));
-      metadatas.push(chunk.metadata);
+      console.log(`[INDEX] Embeddings complete in ${Date.now() - embeddingStart} ms`);
+    } catch (error) {
+      console.error("[INDEX] FAILED during Embedding generation", error);
+      throw error;
     }
 
-    await collection.add({
-      ids,
-      embeddings,
-      documents,
-      metadatas,
-    });
+    console.log('[INDEX] Uploading vectors...');
+    const uploadStart = Date.now();
+    try {
+      await collection.add({
+        ids,
+        embeddings,
+        documents,
+        metadatas,
+      });
+      console.log(`[INDEX] Upload complete in ${Date.now() - uploadStart} ms`);
+    } catch (error) {
+      console.error("[INDEX] FAILED during Chroma insert/upsert", error);
+      throw error;
+    }
 
     return normalizedChunks.map((chunk, index) => ({
       id: ids[index],

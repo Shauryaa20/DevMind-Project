@@ -145,6 +145,9 @@ const createGitHubService = (options = {}) => {
     console.log("REF:", ref);
     console.log("REQUEST URL:", url);
 
+    console.log(`[INDEX] START GitHub API call: ${method} ${url}`);
+    const start = Date.now();
+
     const headers = {
       Accept: accept,
       'X-GitHub-Api-Version': apiVersion,
@@ -172,6 +175,7 @@ const createGitHubService = (options = {}) => {
       console.log("REQUEST URL:", url);
       console.log("STATUS:", response.status);
     } catch (error) {
+      console.error("[INDEX] FAILED during GitHub API calls", error);
       throw new GitHubServiceError(
         'Unable to reach the GitHub API.',
         500,
@@ -179,36 +183,45 @@ const createGitHubService = (options = {}) => {
       );
     }
 
-    if (!response.ok) {
-      let details = undefined;
+    try {
+      if (!response.ok) {
+        let details = undefined;
 
-      try {
-        if (responseType === 'text') {
-          details = await response.text();
-        } else {
-          details = await response.json();
+        try {
+          if (responseType === 'text') {
+            details = await response.text();
+          } else {
+            details = await response.json();
+          }
+        } catch {
+          details = undefined;
         }
-      } catch {
-        details = undefined;
+
+        console.log("ERROR RESPONSE:", details);
+
+        if (response.status === 403 && String(details?.message || details || '').toLowerCase().includes('rate limit')) {
+          throw createRateLimitError(response, details);
+        }
+
+        const message =
+          details?.message || details?.error || details || `GitHub API request failed with status ${response.status}.`;
+
+        throw new GitHubServiceError(message, response.status, details);
       }
 
-      console.log("ERROR RESPONSE:", details);
-
-      if (response.status === 403 && String(details?.message || details || '').toLowerCase().includes('rate limit')) {
-        throw createRateLimitError(response, details);
+      let result;
+      if (responseType === 'text') {
+        result = await response.text();
+      } else {
+        result = await response.json();
       }
 
-      const message =
-        details?.message || details?.error || details || `GitHub API request failed with status ${response.status}.`;
-
-      throw new GitHubServiceError(message, response.status, details);
+      console.log(`[INDEX] SUCCESS GitHub API call: ${method} ${url} in ${Date.now() - start} ms`);
+      return result;
+    } catch (error) {
+      console.error("[INDEX] FAILED during GitHub API calls", error);
+      throw error;
     }
-
-    if (responseType === 'text') {
-      return response.text();
-    }
-
-    return response.json();
   };
 
   const getRepositoryDetails = async (repositoryInput, repoName) => {
@@ -318,63 +331,74 @@ const createGitHubService = (options = {}) => {
   } = {}) => {
     const normalized = normalizeRepoInput(repository || owner, repo);
     const resolvedRef = ref || normalized.ref;
-    const tree = await fetchRepositoryTree({ owner: normalized.owner, repo: normalized.repo, ref: resolvedRef });
-    const blobs = Array.isArray(tree?.tree) ? tree.tree.filter((entry) => entry?.type === 'blob') : [];
 
-    const files = [];
+    console.log(`[INDEX] Fetching repository: ${normalized.owner}/${normalized.repo}...`);
+    const start = Date.now();
 
-    for (const entry of blobs) {
-      if (typeof entry.path !== 'string' || !entry.path.trim()) {
-        continue;
-      }
+    try {
+      const tree = await fetchRepositoryTree({ owner: normalized.owner, repo: normalized.repo, ref: resolvedRef });
+      const blobs = Array.isArray(tree?.tree) ? tree.tree.filter((entry) => entry?.type === 'blob') : [];
 
-      const filePath = entry.path.trim();
-      const size = Number(entry.size || 0);
+      const files = [];
 
-      if (Number.isFinite(maxFileSizeBytes) && maxFileSizeBytes > 0 && size > maxFileSizeBytes) {
-        continue;
-      }
+      for (const entry of blobs) {
+        if (typeof entry.path !== 'string' || !entry.path.trim()) {
+          continue;
+        }
 
-      if (!includeContent) {
-        files.push({
-          fileName: path.basename(filePath),
+        const filePath = entry.path.trim();
+        const size = Number(entry.size || 0);
+
+        if (Number.isFinite(maxFileSizeBytes) && maxFileSizeBytes > 0 && size > maxFileSizeBytes) {
+          continue;
+        }
+
+        if (!includeContent) {
+          files.push({
+            fileName: path.basename(filePath),
+            filePath,
+            sha: entry.sha || null,
+            size,
+            type: entry.type || 'blob',
+            url: entry.url || null,
+          });
+          continue;
+        }
+
+        const content = await fetchFileContent({
+          owner: normalized.owner,
+          repo: normalized.repo,
           filePath,
-          sha: entry.sha || null,
-          size,
-          type: entry.type || 'blob',
-          url: entry.url || null,
+          ref: resolvedRef,
         });
-        continue;
+
+        files.push({
+          fileName: content.fileName,
+          filePath: content.filePath,
+          sha: content.sha,
+          size: content.size,
+          type: content.type,
+          content: content.content,
+          raw: content.raw,
+        });
       }
 
-      const content = await fetchFileContent({
-        owner: normalized.owner,
-        repo: normalized.repo,
-        filePath,
-        ref: resolvedRef,
-      });
+      console.log(`[INDEX] Repository fetched successfully in ${Date.now() - start} ms`);
 
-      files.push({
-        fileName: content.fileName,
-        filePath: content.filePath,
-        sha: content.sha,
-        size: content.size,
-        type: content.type,
-        content: content.content,
-        raw: content.raw,
-      });
+      return {
+        repository: {
+          owner: normalized.owner,
+          repo: normalized.repo,
+          ref: resolvedRef || tree?.sha || undefined,
+        },
+        treeSha: tree?.sha || null,
+        files,
+        raw: tree,
+      };
+    } catch (error) {
+      console.error("[INDEX] FAILED during Repository download", error);
+      throw error;
     }
-
-    return {
-      repository: {
-        owner: normalized.owner,
-        repo: normalized.repo,
-        ref: resolvedRef || tree?.sha || undefined,
-      },
-      treeSha: tree?.sha || null,
-      files,
-      raw: tree,
-    };
   };
 
   const fetchPullRequestDetails = async ({ repository, owner, repo, pullNumber }) => {
