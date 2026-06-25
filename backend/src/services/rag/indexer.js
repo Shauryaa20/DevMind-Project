@@ -341,6 +341,7 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
     repositoryName,
     collectionName = DEFAULT_COLLECTION_NAME,
     chunkOptions = {},
+    fileOptions = {},
   }) => {
     console.log('[INDEX] Discovering files...');
     const discoverStart = Date.now();
@@ -363,21 +364,56 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
     );
 
     // Normalize codeFiles to ensure checkable sourceCode is populated (supporting both sourceCode and content fields)
-    const normalizedFiles = codeFiles.map(file => ({
-      ...file,
-      sourceCode: typeof file.sourceCode === 'string'
+    const normalizedFiles = codeFiles.map((file, index) => {
+      const sourceCode = typeof file.sourceCode === 'string'
         ? file.sourceCode
         : typeof file.content === 'string'
           ? file.content
-          : ''
-    }));
+          : '';
 
-    // Filter out invalid/empty files
+      const relativePath =
+        typeof file.relativePath === 'string' && file.relativePath.trim()
+          ? file.relativePath.trim().split(path.sep).join('/')
+          : typeof file.filePath === 'string' && file.filePath.trim()
+            ? file.filePath.trim().split(path.sep).join('/')
+            : undefined;
+
+      const absolutePath =
+        typeof file.absolutePath === 'string' && file.absolutePath.trim()
+          ? path.resolve(file.absolutePath)
+          : relativePath
+            ? path.join(normalizedRepositoryPath, relativePath)
+            : path.join(normalizedRepositoryPath, `file-${index + 1}`);
+
+      const finalRelativePath = relativePath || normalizeRelativePath(absolutePath, normalizedRepositoryPath);
+
+      const fileName =
+        typeof file.fileName === 'string' && file.fileName.trim()
+          ? file.fileName.trim()
+          : path.basename(finalRelativePath);
+
+      const language =
+        typeof file.language === 'string' && file.language.trim()
+          ? file.language.trim()
+          : 'unknown';
+
+      return {
+        ...file,
+        sourceCode,
+        relativePath: finalRelativePath,
+        absolutePath,
+        fileName,
+        language,
+      };
+    });
+
+    // Filter out invalid/empty files, and check exclusions using isAllowedFile
     const validFiles = normalizedFiles.filter(
       file =>
         file &&
         typeof file.sourceCode === "string" &&
-        file.sourceCode.trim().length > 0
+        file.sourceCode.trim().length > 0 &&
+        isAllowedFile(file.relativePath, fileOptions)
     );
 
     // Log skipped files
@@ -411,47 +447,19 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
     const chunkStart = Date.now();
     let chunkRecords;
     try {
-      chunkRecords = validFiles.flatMap((file, index) => {
-        const relativePath =
-          typeof file.relativePath === 'string' && file.relativePath.trim()
-            ? file.relativePath.trim().split(path.sep).join('/')
-            : typeof file.filePath === 'string' && file.filePath.trim()
-              ? file.filePath.trim().split(path.sep).join('/')
-              : undefined;
-
-        const absolutePath =
-          typeof file.absolutePath === 'string' && file.absolutePath.trim()
-            ? path.resolve(file.absolutePath)
-            : relativePath
-              ? path.join(normalizedRepositoryPath, relativePath)
-              : path.join(normalizedRepositoryPath, `file-${index + 1}`);
-
-        const finalRelativePath = relativePath || normalizeRelativePath(absolutePath, normalizedRepositoryPath);
-
-        const fileName =
-          typeof file.fileName === 'string' && file.fileName.trim()
-            ? file.fileName.trim()
-            : path.basename(finalRelativePath);
-
-        const sourceCode = file.sourceCode;
-
-        const language =
-          typeof file.language === 'string' && file.language.trim()
-            ? file.language.trim()
-            : 'unknown';
-
+      chunkRecords = validFiles.flatMap((file) => {
         const chunks = chunker.chunkCodeFile(
           {
-            sourceCode,
-            filePath: finalRelativePath,
-            language,
-            id: finalRelativePath,
+            sourceCode: file.sourceCode,
+            filePath: file.relativePath,
+            language: file.language,
+            id: file.relativePath,
             metadata: {
               repository: normalizedRepositoryName,
               repositoryPath: normalizedRepositoryPath,
-              fileName,
-              filePath: finalRelativePath,
-              absolutePath,
+              fileName: file.fileName,
+              filePath: file.relativePath,
+              absolutePath: file.absolutePath,
             },
           },
           chunkOptions,
@@ -464,9 +472,9 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
             ...chunk.metadata,
             repository: normalizedRepositoryName,
             repositoryPath: normalizedRepositoryPath,
-            fileName,
-            filePath: finalRelativePath,
-            absolutePath,
+            fileName: file.fileName,
+            filePath: file.relativePath,
+            absolutePath: file.absolutePath,
             chunkId: chunk.chunkId,
           },
         }));
