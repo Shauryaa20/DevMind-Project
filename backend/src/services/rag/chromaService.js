@@ -243,23 +243,49 @@ const createChromaService = () => {
     const documents = [];
     const metadatas = [];
 
+    const totalChunks = normalizedChunks.length;
+    const batchSize = Number(process.env.EMBEDDING_BATCH_SIZE) || 32;
+    const totalBatches = Math.ceil(totalChunks / batchSize);
+
+    console.log(`[Embedding] Total chunks: ${totalChunks}`);
+    console.log(`[Embedding] Batch size: ${batchSize}`);
     console.log('[INDEX] Starting embeddings...');
+
     const embeddingStart = Date.now();
     try {
-      for (const chunk of normalizedChunks) {
-        const { vector } = await embedder.embedSourceCode(chunk.sourceCode);
+      for (let i = 0; i < totalChunks; i += batchSize) {
+        const batchNum = Math.floor(i / batchSize) + 1;
+        console.log(`[Embedding] Processing batch ${batchNum}/${totalBatches}`);
+        const batchStart = Date.now();
 
-        if (!Array.isArray(vector) || !vector.length) {
-          throw new ChromaServiceError('Failed to generate a valid embedding vector.', 500);
+        const batchChunks = normalizedChunks.slice(i, i + batchSize);
+        const batchTexts = batchChunks.map(c => c.sourceCode);
+
+        const { vectors } = await embedder.embedMany(batchTexts);
+
+        if (!Array.isArray(vectors) || vectors.length !== batchChunks.length) {
+          throw new ChromaServiceError('Failed to generate valid embedding vectors for batch.', 500);
         }
 
-        const chunkId = chunk.id || `chunk_${Date.now()}_${ids.length}`;
+        console.log(`[Embedding] Batch ${batchNum} completed in ${Date.now() - batchStart} ms`);
 
-        ids.push(chunkId);
-        embeddings.push(vector);
-        documents.push(buildDocumentText(chunk.sourceCode, chunk.metadata));
-        metadatas.push(chunk.metadata);
+        for (let j = 0; j < batchChunks.length; j++) {
+          const chunk = batchChunks[j];
+          const vector = vectors[j];
+
+          if (!Array.isArray(vector) || !vector.length) {
+            throw new ChromaServiceError('Failed to generate a valid embedding vector.', 500);
+          }
+
+          const chunkId = chunk.id || `chunk_${Date.now()}_${ids.length}`;
+
+          ids.push(chunkId);
+          embeddings.push(vector);
+          documents.push(buildDocumentText(chunk.sourceCode, chunk.metadata));
+          metadatas.push(chunk.metadata);
+        }
       }
+      console.log(`[Embedding] All embeddings completed in ${Date.now() - embeddingStart} ms`);
       console.log(`[INDEX] Embeddings complete in ${Date.now() - embeddingStart} ms`);
     } catch (error) {
       console.error("[INDEX] FAILED during Embedding generation", error);
