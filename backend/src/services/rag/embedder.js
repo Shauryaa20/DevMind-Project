@@ -79,11 +79,24 @@ const createEmbedder = () => {
     const input = normalizeSourceCode(sourceCode);
 
     try {
+      console.log('[Embedding] Loading model...');
+      const modelStart = Date.now();
       const extractor = await getPipeline();
+      console.log(`[Embedding] Model ready in ${Date.now() - modelStart} ms`);
+
       const isArray = Array.isArray(input);
       const texts = isArray ? input : [input];
 
-      const output = await extractor(texts, { pooling: 'mean', normalize: true });
+      console.log(`[Embedding] Calling extractor with ${texts.length} texts`);
+      let output;
+      const extractorStart = Date.now();
+      try {
+        output = await extractor(texts, { pooling: 'mean', normalize: true });
+        console.log(`[Embedding] Extractor finished in ${Date.now() - extractorStart} ms`);
+      } catch (err) {
+        console.error('[Embedding] Extractor failed', err);
+        throw err;
+      }
 
       const shape = output.dims; // [num_texts, embedding_dim]
       const size = shape[1];
@@ -99,6 +112,8 @@ const createEmbedder = () => {
           ),
         );
       }
+
+      console.log(`[Embedding] Generated ${vectors.length} vectors`);
 
       return {
         model: options.model || config.embeddingModel || 'sentence-transformers/all-MiniLM-L6-v2',

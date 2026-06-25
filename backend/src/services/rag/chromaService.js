@@ -249,16 +249,18 @@ const createChromaService = () => {
 
     console.log(`[Embedding] Total chunks: ${totalChunks}`);
     console.log(`[Embedding] Batch size: ${batchSize}`);
+    console.log(`[Embedding] Total batches: ${totalBatches}`);
     console.log('[INDEX] Starting embeddings...');
 
     const embeddingStart = Date.now();
     try {
       for (let i = 0; i < totalChunks; i += batchSize) {
         const batchNum = Math.floor(i / batchSize) + 1;
+        const batchChunks = normalizedChunks.slice(i, i + batchSize);
         console.log(`[Embedding] Processing batch ${batchNum}/${totalBatches}`);
+        console.log(`[Embedding] Current batch number: ${batchNum}, Total batches: ${totalBatches}, Number of chunks in batch: ${batchChunks.length}`);
         const batchStart = Date.now();
 
-        const batchChunks = normalizedChunks.slice(i, i + batchSize);
         const batchTexts = batchChunks.map(c => c.sourceCode);
 
         const { vectors } = await embedder.embedMany(batchTexts);
@@ -267,7 +269,9 @@ const createChromaService = () => {
           throw new ChromaServiceError('Failed to generate valid embedding vectors for batch.', 500);
         }
 
-        console.log(`[Embedding] Batch ${batchNum} completed in ${Date.now() - batchStart} ms`);
+        const batchDuration = Date.now() - batchStart;
+        console.log(`[Embedding] Batch ${batchNum} completed in ${batchDuration} ms`);
+        console.log(`[Embedding] Time taken per batch: ${batchDuration} ms`);
 
         for (let j = 0; j < batchChunks.length; j++) {
           const chunk = batchChunks[j];
@@ -285,8 +289,10 @@ const createChromaService = () => {
           metadatas.push(chunk.metadata);
         }
       }
-      console.log(`[Embedding] All embeddings completed in ${Date.now() - embeddingStart} ms`);
-      console.log(`[INDEX] Embeddings complete in ${Date.now() - embeddingStart} ms`);
+      const totalEmbeddingTime = Date.now() - embeddingStart;
+      console.log(`[Embedding] All embeddings completed in ${totalEmbeddingTime} ms`);
+      console.log(`[Embedding] Total embedding time: ${totalEmbeddingTime} ms`);
+      console.log(`[INDEX] Embeddings complete in ${totalEmbeddingTime} ms`);
     } catch (error) {
       console.error("[INDEX] FAILED during Embedding generation", error);
       throw error;

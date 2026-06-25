@@ -24,7 +24,6 @@ const DEFAULT_IGNORED_DIRECTORIES = new Set([
 const DEFAULT_CODE_EXTENSIONS = new Set([
   '.cjs',
   '.cs',
-  '.css',
   '.go',
   '.html',
   '.java',
@@ -33,14 +32,12 @@ const DEFAULT_CODE_EXTENSIONS = new Set([
   '.jsx',
   '.kt',
   '.kts',
-  '.less',
   '.md',
   '.mjs',
   '.php',
   '.py',
   '.rb',
   '.rs',
-  '.scss',
   '.sh',
   '.sql',
   '.swift',
@@ -57,11 +54,8 @@ const DEFAULT_CODE_FILENAMES = new Set([
   'Makefile',
   'Procfile',
   '.env.example',
-  '.gitignore',
   '.dockerignore',
-  'package-lock.json',
   'package.json',
-  'pnpm-lock.yaml',
   'tsconfig.json',
   'vite.config.js',
 ]);
@@ -98,6 +92,29 @@ const normalizeRelativePath = (absolutePath, repositoryPath) => {
 };
 
 const isAllowedFile = (filePath, options = {}) => {
+  const baseName = path.basename(filePath);
+  const extension = path.extname(baseName).toLowerCase();
+
+  // Exclude lock files
+  if (baseName === 'package-lock.json' || baseName === 'pnpm-lock.yaml' || baseName === 'yarn.lock' || baseName === 'bun.lockb') {
+    return false;
+  }
+
+  // Exclude styling files
+  if (extension === '.css' || extension === '.scss' || extension === '.sass' || extension === '.less') {
+    return false;
+  }
+
+  // Exclude repository metadata/configuration
+  if (baseName === '.gitignore' || baseName === '.gitattributes' || baseName === '.editorconfig') {
+    return false;
+  }
+
+  // Exclude minified assets
+  if (baseName.endsWith('.min.js') || baseName.endsWith('.min.css')) {
+    return false;
+  }
+
   const allowedExtensions = new Set(
     Array.isArray(options.allowedExtensions) && options.allowedExtensions.length > 0
       ? options.allowedExtensions.map((extension) => String(extension).toLowerCase())
@@ -109,9 +126,6 @@ const isAllowedFile = (filePath, options = {}) => {
       ? options.allowedFileNames
       : Array.from(DEFAULT_CODE_FILENAMES),
   );
-
-  const baseName = path.basename(filePath);
-  const extension = path.extname(baseName).toLowerCase();
 
   if (allowedFileNames.has(baseName)) {
     return true;
@@ -289,6 +303,12 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
         }));
       });
       console.log(`[INDEX] Chunks generated: ${chunkRecords.length} in ${Date.now() - chunkStart} ms`);
+      const totalSupportedFiles = codeFiles.length;
+      const totalGeneratedChunks = chunkRecords.length;
+      const avgChunks = totalSupportedFiles > 0 ? (totalGeneratedChunks / totalSupportedFiles) : 0;
+      console.log(`[INDEX] Total supported files: ${totalSupportedFiles}`);
+      console.log(`[INDEX] Total generated chunks: ${totalGeneratedChunks}`);
+      console.log(`[INDEX] Average chunks per file: ${avgChunks.toFixed(2)}`);
     } catch (error) {
       console.error("[INDEX] FAILED during Chunk generation", error);
       throw error;
@@ -452,6 +472,12 @@ const createIndexer = ({ chunker = getChunker(), chromaService = getChromaServic
         }));
       });
       console.log(`[INDEX] Chunks generated: ${chunkRecords.length} in ${Date.now() - chunkStart} ms`);
+      const totalSupportedFiles = validFiles.length;
+      const totalGeneratedChunks = chunkRecords.length;
+      const avgChunks = totalSupportedFiles > 0 ? (totalGeneratedChunks / totalSupportedFiles) : 0;
+      console.log(`[INDEX] Total supported files: ${totalSupportedFiles}`);
+      console.log(`[INDEX] Total generated chunks: ${totalGeneratedChunks}`);
+      console.log(`[INDEX] Average chunks per file: ${avgChunks.toFixed(2)}`);
     } catch (error) {
       console.error("[INDEX] FAILED during Chunk generation", error);
       throw error;
